@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "title": "Mi App Fullstack",
+    "description": "Proyecto TypeScript con Next.js y Vercel",
+    "version": "1.0.0"
+  },
+  "home": {
+    "headline": "Hola Mundo",
+    "subtitle": "TypeScript funcionando correctamente",
+    "animationStyle": "fadeInUp"
+  }
+}
