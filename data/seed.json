@@ -1,0 +1,26 @@
+{
+  "seed": true,
+  "createdAt": "2026-05-25T00:00:00Z",
+  "users": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "email": "superadmin@hotelapp.test",
+      "role": "superadmin",
+      "name": "Super Admin",
+      "password": "supersecret"
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "email": "recepcion@hotelapp.test",
+      "role": "recepcion",
+      "name": "Recepción",
+      "password": "recepcionpass"
+    }
+  ],
+  "rooms": [
+    { "id": "r1", "room_number": "101", "status": "disponible", "price_per_night": 100 },
+    { "id": "r2", "room_number": "102", "status": "disponible", "price_per_night": 120 },
+    { "id": "r3", "room_number": "103", "status": "disponible", "price_per_night": 90 },
+    { "id": "r4", "room_number": "104", "status": "disponible", "price_per_night": 150 }
+  ]
+}

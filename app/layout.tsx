@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import Sidebar from './components/Sidebar';
 
 export const metadata: Metadata = {
   title: 'Mi App Fullstack',
@@ -13,7 +14,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body style={{ display: 'flex' }}>
+        <Sidebar />
+        <main style={{ flex: 1 }}>{children}</main>
+      </body>
     </html>
   );
 }
