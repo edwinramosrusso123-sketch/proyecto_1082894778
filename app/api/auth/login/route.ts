@@ -1,32 +1,37 @@
 import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-import seed from '@/data/seed.json';
-import jwt from 'jsonwebtoken';
+import { loginSchema } from '@/lib/schemas';
+import { getUserByEmail, updateLastLogin, recordAudit } from '@/lib/dataService';
+import { verifyPassword, createSessionToken, setSessionCookie } from '@/lib/auth';
+import { jsonError } from '@/lib/withAuth';
+import { UnauthorizedError, ValidationError, ForbiddenError } from '@/lib/errors';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
-
-export async function POST(request: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const body = await request.json();
-    const { email, password } = body;
+    const body = await req.json().catch(() => ({}));
+    const parsed = loginSchema.safeParse(body);
+    if (!parsed.success) throw new ValidationError('Datos inválidos', parsed.error.flatten());
 
-    const user = (seed as any).users.find((u: any) => u.email === email && u.password === password);
-    if (!user) {
-      return NextResponse.json({ success: false, error: 'Credenciales inválidas' }, { status: 401 });
-    }
+    const user = await getUserByEmail(parsed.data.email);
+    if (!user) throw new UnauthorizedError('Correo o contraseña incorrectos');
+    if (!user.is_active) throw new ForbiddenError('Tu cuenta está suspendida. Contacta al administrador.');
 
-    const token = jwt.sign({ sub: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
+    const ok = await verifyPassword(parsed.data.password, user.password_hash);
+    if (!ok) throw new UnauthorizedError('Correo o contraseña incorrectos');
 
-    const res = NextResponse.json({ success: true, token });
-    // Set cookie for server-side auth (middleware reads cookie)
-    const cookieOptions = [`token=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
-    if (process.env.NODE_ENV === 'production') cookieOptions.push('Secure');
-    // expires in 8 hours
-    const expires = new Date(Date.now() + 8 * 60 * 60 * 1000).toUTCString();
-    cookieOptions.push(`Expires=${expires}`);
-    res.headers.set('Set-Cookie', cookieOptions.join('; '));
-    return res;
+    const token = await createSessionToken(user);
+    await setSessionCookie(token);
+    await updateLastLogin(user.id);
+    await recordAudit({
+      user_id: user.id, user_email: user.email, user_role: user.role,
+      action: 'login', entity: 'system', summary: `${user.email} inició sesión`,
+    });
+
+    const redirectTo = user.role === 'cliente' ? '/my-reservations' : '/dashboard';
+    return NextResponse.json({
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, mustChangePassword: user.must_change_password },
+      redirectTo,
+    });
   } catch (err) {
-    return NextResponse.json({ success: false, error: 'Error en servidor' }, { status: 500 });
+    return jsonError(err);
   }
 }

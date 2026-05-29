@@ -1,22 +1,31 @@
-import './globals.css';
 import type { Metadata } from 'next';
-import Sidebar from './components/Sidebar';
+import { Fraunces, Manrope } from 'next/font/google';
+import './globals.css';
+import { ToastProvider } from '@/components/ui/Toast';
+
+const display = Fraunces({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-display',
+  display: 'swap',
+});
+const sans = Manrope({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-sans',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
-  title: 'Mi App Fullstack',
-  description: 'Proyecto TypeScript con Next.js y Vercel',
+  title: 'HotelApp — Gestión hotelera inteligente',
+  description: 'Sistema de gestión de habitaciones, clientes y reservas.',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es">
-      <body style={{ display: 'flex' }}>
-        <Sidebar />
-        <main style={{ flex: 1 }}>{children}</main>
+    <html lang="es" className={`${display.variable} ${sans.variable}`}>
+      <body className="font-sans antialiased">
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );

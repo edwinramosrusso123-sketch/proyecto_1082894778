@@ -1,16 +1,8 @@
-import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
+import { getSession } from '@/lib/auth';
 
-export const metadata: Metadata = {
-  title: 'Hola Mundo',
-};
-
-export default function Home() {
-  return (
-    <main className="page-root">
-      <div className="hero">
-        <h1>Hola Mundo</h1>
-        <p>TypeScript y Next.js 14 listos para desplegar en Vercel.</p>
-      </div>
-    </main>
-  );
+export default async function Home() {
+  const session = await getSession();
+  if (!session) redirect('/login');
+  redirect(session.role === 'cliente' ? '/my-reservations' : '/dashboard');
 }

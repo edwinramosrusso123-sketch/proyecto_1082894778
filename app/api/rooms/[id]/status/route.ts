@@ -1,26 +1,16 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { withAuth } from '@/lib/withAuth';
+import { changeRoomStatus } from '@/lib/dataService';
+import { changeRoomStatusSchema } from '@/lib/schemas';
+import { ValidationError } from '@/lib/errors';
 
-const seedPath = path.join(process.cwd(), 'data', 'seed.json');
-
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
-  const id = params.id;
-  const body = await request.json();
-  const { status } = body;
-  const raw = await fs.readFile(seedPath, 'utf8');
-  const data = JSON.parse(raw);
-  const room = data.rooms.find((r: any) => r.id === id);
-  if (!room) return NextResponse.json({ success: false, error: 'Habitación no encontrada' }, { status: 404 });
-  if (status === 'mantenimiento') {
-    if (room.status !== 'disponible') {
-      return NextResponse.json({ success: false, error: 'Solo se puede poner en mantenimiento una habitación disponible' }, { status: 409 });
-    }
-    room.status = 'mantenimiento';
-    await fs.writeFile(seedPath, JSON.stringify(data, null, 2), 'utf8');
-    return NextResponse.json({ success: true, room });
-  }
-  room.status = status;
-  await fs.writeFile(seedPath, JSON.stringify(data, null, 2), 'utf8');
-  return NextResponse.json({ success: true, room });
-}
+export const PATCH = withAuth(async ({ req, params, session }) => {
+  const body = await req.json().catch(() => ({}));
+  const parsed = changeRoomStatusSchema.safeParse(body);
+  if (!parsed.success) throw new ValidationError('Datos inválidos', parsed.error.flatten());
+  const room = await changeRoomStatus(
+    { id: session.userId, email: session.email, role: session.role },
+    params.id, parsed.data.status,
+  );
+  return NextResponse.json({ room });
+}, ['recepcion', 'superadmin']);

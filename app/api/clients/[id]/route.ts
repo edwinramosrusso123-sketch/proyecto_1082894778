@@ -1,37 +1,24 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs/promises';
-import path from 'path';
+import { withAuth } from '@/lib/withAuth';
+import { getClientById, updateClient, deleteClient } from '@/lib/dataService';
+import { updateClientSchema } from '@/lib/schemas';
+import { NotFoundError, ValidationError } from '@/lib/errors';
 
-const clientsPath = path.join(process.cwd(), 'data', 'clients.json');
+export const GET = withAuth(async ({ params }) => {
+  const client = await getClientById(params.id);
+  if (!client) throw new NotFoundError('Cliente no encontrado');
+  return NextResponse.json({ client });
+}, ['recepcion', 'superadmin']);
 
-function parseJwt(token: string | undefined) {
-  try {
-    if (!token) return null;
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = parts[1];
-    const json = Buffer.from(payload, 'base64').toString('utf8');
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+export const PUT = withAuth(async ({ req, params, session }) => {
+  const body = await req.json().catch(() => ({}));
+  const parsed = updateClientSchema.safeParse(body);
+  if (!parsed.success) throw new ValidationError('Datos inválidos', parsed.error.flatten());
+  const client = await updateClient({ id: session.userId, email: session.email, role: session.role }, params.id, parsed.data);
+  return NextResponse.json({ client });
+}, ['recepcion', 'superadmin']);
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
-  const id = params.id;
-  const raw = await fs.readFile(clientsPath, 'utf8');
-  const clients = JSON.parse(raw || '[]');
-  const client = clients.find((c: any) => c.id === id);
-  if (!client) return NextResponse.json({ success: false, error: 'No encontrado' }, { status: 404 });
-
-  // RN-09: si el requester es role='cliente', validar user_id
-  const token = request.headers.get('authorization')?.replace('Bearer ', '') || undefined;
-  const payload = parseJwt(token);
-  if (payload?.role === 'cliente') {
-    if (client.user_id !== payload.sub) {
-      return NextResponse.json({ success: false, error: 'No autorizado' }, { status: 403 });
-    }
-  }
-
-  return NextResponse.json({ success: true, client });
-}
+export const DELETE = withAuth(async ({ params, session }) => {
+  await deleteClient({ id: session.userId, email: session.email, role: session.role }, params.id);
+  return NextResponse.json({ ok: true });
+}, ['superadmin']);

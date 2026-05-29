@@ -1,42 +1,83 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { jwtVerify } from 'jose';
 
-function parseJwt(token: string | undefined) {
+const COOKIE = 'hotelapp_session';
+
+// Rutas que un cliente (huésped) SÍ puede ver
+const CLIENT_ALLOWED = ['/my-reservations', '/profile'];
+// Rutas exclusivas de superadmin
+const SUPERADMIN_ONLY = ['/admin'];
+// Rutas internas (recepción + superadmin)
+const STAFF_ONLY = ['/dashboard', '/rooms', '/clients', '/reservations'];
+
+async function getRole(req: NextRequest): Promise<string | null> {
+  const token = req.cookies.get(COOKIE)?.value;
+  if (!token) return null;
   try {
-    if (!token) return null;
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = parts[1];
-    const json = Buffer.from(payload, 'base64').toString('utf8');
-    return JSON.parse(json);
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET);
+    const { payload } = await jwtVerify(token, secret);
+    return (payload.role as string) ?? null;
   } catch {
     return null;
   }
 }
 
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  // Only protect app routes (simple heuristic)
-  if (pathname.startsWith('/api') || pathname.startsWith('/_next') || pathname === '/' ) {
-    return NextResponse.next();
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  const role = await getRole(req);
+
+  // No autenticado → login (salvo que ya esté en login)
+  if (!role) {
+    if (pathname === '/login') return NextResponse.next();
+    const url = req.nextUrl.clone();
+    url.pathname = '/login';
+    return NextResponse.redirect(url);
   }
 
-  const token = request.cookies.get('token')?.value;
-  const payload = parseJwt(token);
-  const role = payload?.role;
+  // Autenticado entrando a /login o raíz → su panel
+  if (pathname === '/login' || pathname === '/') {
+    const url = req.nextUrl.clone();
+    url.pathname = role === 'cliente' ? '/my-reservations' : '/dashboard';
+    return NextResponse.redirect(url);
+  }
 
+  // Cliente: solo /my-reservations y /profile
   if (role === 'cliente') {
-    const allowed = ['/my-reservations', '/profile', '/api/reservations/my', '/api/auth/login'];
-    if (!allowed.some(p => pathname === p || pathname.startsWith(p))) {
-      const url = request.nextUrl.clone();
+    const allowed = CLIENT_ALLOWED.some((p) => pathname.startsWith(p));
+    if (!allowed) {
+      const url = req.nextUrl.clone();
       url.pathname = '/my-reservations';
       return NextResponse.redirect(url);
     }
+  }
+
+  // Recepción: no puede entrar a /admin
+  if (role === 'recepcion' && SUPERADMIN_ONLY.some((p) => pathname.startsWith(p))) {
+    const url = req.nextUrl.clone();
+    url.pathname = '/dashboard';
+    return NextResponse.redirect(url);
+  }
+
+  // Staff (recepcion/superadmin) no debe caer en /my-reservations del cliente
+  if (role !== 'cliente' && pathname.startsWith('/my-reservations')) {
+    const url = req.nextUrl.clone();
+    url.pathname = '/dashboard';
+    return NextResponse.redirect(url);
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: '/((?!_next/static|_next/image|favicon.ico).*)',
+  matcher: [
+    '/',
+    '/login',
+    '/dashboard/:path*',
+    '/rooms/:path*',
+    '/clients/:path*',
+    '/reservations/:path*',
+    '/my-reservations/:path*',
+    '/profile/:path*',
+    '/admin/:path*',
+  ],
 };
