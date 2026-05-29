@@ -26,7 +26,10 @@ export async function POST(req: Request) {
       action: 'login', entity: 'system', summary: `${user.email} inició sesión`,
     });
 
-    const redirectTo = user.role === 'cliente' ? '/my-reservations' : '/dashboard';
+    // 6.4: si tiene contraseña temporal, va primero a /profile a cambiarla
+    const redirectTo = user.must_change_password
+      ? '/profile'
+      : user.role === 'cliente' ? '/my-reservations' : '/dashboard';
     return NextResponse.json({
       user: { id: user.id, name: user.name, email: user.email, role: user.role, mustChangePassword: user.must_change_password },
       redirectTo,

@@ -148,15 +148,68 @@ async function main() {
   r = await cliente(`/api/reservations/${resId}/cancel`, { method: 'POST' });
   check('RS-03', 'Cliente NO puede cancelar reservas → 403', r.status === 403);
 
+  // ════ EDITAR HABITACIÓN / CLIENTE ════
+  console.log('\nEDICIÓN (CU-03 / CU-09)');
+  r = await admin(`/api/rooms/${roomId}`, { method: 'PUT', body: JSON.stringify({ description: 'editada-desktest', type: 'suite' }) });
+  check('CU-03', 'SuperAdmin edita habitación', r.status === 200 && r.body?.room?.type === 'suite' && r.body?.room?.description === 'editada-desktest');
+  r = await recep(`/api/clients/${clientId}`, { method: 'PUT', body: JSON.stringify({ phone: '3009998888' }) });
+  check('CU-09', 'Recepción edita cliente', r.status === 200 && r.body?.client?.phone === '3009998888');
+
+  // ════ ELIMINAR HABITACIÓN (sin reservas) ════
+  console.log('\nELIMINAR HABITACIÓN (CU-04)');
+  r = await admin('/api/rooms', { method: 'POST', body: JSON.stringify({ room_number: 'D' + TAG.slice(-3), type: 'simple', status: 'disponible', price_per_night: 90000 }) });
+  const delRoomId = r.body?.room?.id;
+  r = await admin(`/api/rooms/${delRoomId}`, { method: 'DELETE' });
+  check('CU-04', 'SuperAdmin elimina habitación sin reservas', r.status === 200);
+  r = await admin(`/api/rooms/${delRoomId}`);
+  check('CU-04', 'Habitación eliminada ya no existe → 404', r.status === 404);
+
+  // ════ DISPONIBILIDAD EXCLUYE MANTENIMIENTO ════
+  console.log('\nDISPONIBILIDAD');
+  await admin(`/api/rooms/${roomId}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'mantenimiento' }) });
+  r = await recep(`/api/rooms/available?checkIn=${iso(40)}&checkOut=${iso(42)}`);
+  check('RN-02', 'Habitaciones disponibles excluyen las de mantenimiento', r.status === 200 && !r.body.rooms.some((x) => x.id === roomId));
+  await admin(`/api/rooms/${roomId}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'disponible' }) });
+
+  // ════ PORTAL: CREAR CLIENTE CON ACCESO Y QUE HAGA LOGIN (4.7) ════
+  console.log('\nCREAR CLIENTE CON PORTAL (4.7)');
+  const portalEmail = `portal.${TAG}@desktest.local`;
+  r = await recep('/api/clients', { method: 'POST', body: JSON.stringify({ name: `Portal ${TAG}`, email: portalEmail, identification_number: `${TAG}PORT`, create_portal_access: true, portal_password: 'portal123' }) });
+  check('4.7', 'Recepción crea cliente con acceso al portal', r.status === 201 && !!r.body?.client?.user_id);
+  const portalClientId = r.body?.client?.id;
+  const portalSession = makeSession();
+  r = await portalSession('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: portalEmail, password: 'portal123' }) });
+  check('4.7/RN-09', 'El huésped del portal puede iniciar sesión', r.status === 200 && r.body?.user?.role === 'cliente');
+  r = await portalSession('/api/reservations/my');
+  check('RF-10', 'El huésped del portal ve su propio listado (vacío)', r.status === 200 && Array.isArray(r.body?.reservations) && r.body.reservations.length === 0);
+
   // ════ USUARIOS (SuperAdmin) ════
   console.log('\nUSUARIOS');
   r = await admin('/api/users', { method: 'POST', body: JSON.stringify({ name: `User ${TAG}`, email: `user.${TAG}@desktest.local`, role: 'recepcion' }) });
   check('RF-14/6.4', 'SuperAdmin crea usuario con contraseña temporal', r.status === 201 && typeof r.body?.tempPassword === 'string' && r.body.tempPassword.length >= 6);
   const newUserId = r.body?.user?.id;
+  const tempPass = r.body?.tempPassword;
   r = await recep('/api/users');
   check('PERM', 'Recepción NO lista usuarios → 403', r.status === 403);
+
+  // 6.4: el usuario con contraseña temporal entra y es redirigido a /profile
+  const tempSession = makeSession();
+  r = await tempSession('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: `user.${TAG}@desktest.local`, password: tempPass }) });
+  check('6.4', 'Usuario con contraseña temporal → redirige a /profile', r.status === 200 && r.body?.redirectTo === '/profile' && r.body?.user?.mustChangePassword === true);
+
+  // CU-A3: cambia su contraseña con la actual correcta
+  r = await tempSession('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: tempPass, newPassword: 'cambiada456' }) });
+  check('CU-A3', 'Cambio de contraseña con la actual correcta → 200', r.status === 200);
+  const reSession = makeSession();
+  r = await reSession('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: `user.${TAG}@desktest.local`, password: 'cambiada456' }) });
+  check('CU-A3', 'Login con la nueva contraseña funciona y ya no pide cambio', r.status === 200 && r.body?.redirectTo === '/dashboard');
+
+  // RF-14: suspender e impedir login
   r = await admin(`/api/users/${newUserId}`, { method: 'PATCH', body: JSON.stringify({ is_active: false }) });
   check('RF-14', 'SuperAdmin suspende usuario', r.status === 200 && r.body?.user?.is_active === false);
+  const suspSession = makeSession();
+  r = await suspSession('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: `user.${TAG}@desktest.local`, password: 'cambiada456' }) });
+  check('RF-14/RS', 'Usuario suspendido NO puede iniciar sesión → 403', r.status === 403);
 
   // ════ AUDITORÍA ════
   console.log('\nAUDITORÍA');
@@ -167,19 +220,29 @@ async function main() {
   r = await recep('/api/audit');
   check('PERM', 'Recepción NO ve auditoría → 403', r.status === 403);
 
-  // ════ CAMBIO DE CONTRASEÑA ════
+  // ════ CAMBIO DE CONTRASEÑA (caso de error) ════
   console.log('\nCAMBIO DE CONTRASEÑA');
   r = await recep('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: 'malo', newPassword: 'nueva123' }) });
   check('CU-A3', 'Cambio con contraseña actual incorrecta → 401', r.status === 401);
+
+  // ════ LOGOUT (CU-A2) ════
+  console.log('\nLOGOUT');
+  const logoutSession = makeSession();
+  await logoutSession('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: 'recepcion@hotelapp.com', password: 'recepcion123' }) });
+  r = await logoutSession('/api/auth/me');
+  check('CU-A2', 'Sesión activa antes del logout (/api/auth/me 200)', r.status === 200);
+  r = await logoutSession('/api/auth/logout', { method: 'POST' });
+  check('CU-A2', 'Logout responde 200', r.status === 200);
 
   // ── Limpieza de datos de prueba ──
   console.log('\nLIMPIEZA');
   const db = makeClient();
   await db.connect();
+  await db.query(`DELETE FROM reservations WHERE client_id = ANY($1::uuid[])`, [[clientId, portalClientId].filter(Boolean)]);
   await db.query('DELETE FROM reservations WHERE id = $1', [resId]);
-  await db.query('DELETE FROM rooms WHERE id = $1', [roomId]);
-  await db.query('DELETE FROM clients WHERE id = $1', [clientId]);
-  await db.query('DELETE FROM users WHERE id = $1', [newUserId]);
+  await db.query('DELETE FROM rooms WHERE id = ANY($1::uuid[])', [[roomId, delRoomId].filter(Boolean)]);
+  await db.query('DELETE FROM clients WHERE id = ANY($1::uuid[])', [[clientId, portalClientId].filter(Boolean)]);
+  await db.query(`DELETE FROM users WHERE email LIKE '%@desktest.local'`);
   await db.query(`DELETE FROM audit_log WHERE user_email LIKE '%@desktest.local' OR summary LIKE '%${TAG}%'`);
   await db.end();
   console.log('  ✓ datos de prueba eliminados');
